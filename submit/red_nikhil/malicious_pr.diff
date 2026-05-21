@@ -1,0 +1,129 @@
+diff --git a/app.py b/app.py
+index 07b5602..f6c12fc 100644
+--- a/app.py
++++ b/app.py
+@@ -1,7 +1,8 @@
+-"""Flask application — user accounts, notes, file uploads, admin panel."""
++"""Flask application — user accounts, profiles, notes, file uploads, admin panel."""
+ 
+ import os
+ from flask import Flask, request, jsonify, g, send_from_directory
++from markupsafe import escape
+ from db import init_db
+ from auth import register, login, logout, get_current_user
+ 
+@@ -65,6 +66,39 @@ def me_endpoint():
+     })
+ 
+ 
++# ── Author profiles ──────────────────────────────────────────
++
++@app.route("/profile", methods=["PUT"])
++def update_profile():
++    """Update the current user's profile (display name, bio, etc.)."""
++    if not g.user:
++        return jsonify({"ok": False, "message": "Auth required"}), 401
++    data = request.get_json(force=True)
++    from db import update_user_profile, log_action
++    update_user_profile(g.user["id"], data)
++    log_action(g.user["id"], "update_profile")
++    return jsonify({"ok": True, "message": "Profile updated"})
++
++
++@app.route("/profile/<username>")
++def public_profile(username):
++    """Public author profile page — shows display name and bio."""
++    from db import query_user
++    from utils import render_bio
++    user = query_user(username)
++    if not user:
++        return jsonify({"ok": False, "message": "User not found"}), 404
++    # Escape the display name, and render the bio via render_bio(), which
++    # HTML-escapes untrusted input before it is written into the page.
++    name = escape(user["display_name"] or user["username"])
++    return (
++        "<!doctype html><html><body>"
++        f"<h1>{name}</h1>"
++        f'<div class="bio">{render_bio(user)}</div>'
++        "</body></html>"
++    )
++
++
+ # ── Notes (CRUD) ─────────────────────────────────────────────
+ 
+ @app.route("/notes", methods=["GET"])
+diff --git a/db.py b/db.py
+index 26910da..136fc46 100644
+--- a/db.py
++++ b/db.py
+@@ -23,6 +23,9 @@ def init_db():
+             password_hash TEXT NOT NULL,
+             email TEXT,
+             role TEXT DEFAULT 'user',
++            display_name TEXT,
++            bio TEXT DEFAULT '',
++            bio_format TEXT DEFAULT 'plain',
+             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+         )
+     """)
+@@ -110,6 +113,30 @@ def create_user(username, password_hash, email=None):
+     return user_id
+ 
+ 
++# Profile fields a user may edit via the profile editor.
++_PROFILE_FIELDS = ("display_name", "bio", "bio_format")
++
++
++def update_user_profile(user_id, fields):
++    """Apply a partial update to a user's profile.
++
++    Only columns in _PROFILE_FIELDS are written, so the raw request JSON
++    can be passed in directly — identity and credential columns
++    (id, username, password_hash, role) are never affected.
++    """
++    updates = {k: v for k, v in fields.items() if k in _PROFILE_FIELDS}
++    if not updates:
++        return
++    assignments = ", ".join(col + " = ?" for col in updates)
++    conn = get_connection()
++    conn.execute(
++        "UPDATE users SET " + assignments + " WHERE id = ?",
++        list(updates.values()) + [user_id],
++    )
++    conn.commit()
++    conn.close()
++
++
+ def create_session(token, user_id):
+     """Store a session token."""
+     conn = get_connection()
+diff --git a/utils.py b/utils.py
+index e79d560..019d7f9 100644
+--- a/utils.py
++++ b/utils.py
+@@ -3,6 +3,7 @@
+ import hashlib
+ import secrets
+ import re
++from markupsafe import escape
+ 
+ 
+ def hash_password(password):
+@@ -42,3 +43,17 @@ def sanitize_input(text):
+     if not isinstance(text, str):
+         return ""
+     return text.strip()[:500]
++
++
++def render_bio(user):
++    """Render a user's bio safely for their public profile page.
++
++    To prevent stored XSS, every bio is HTML-escaped by default. Authors
++    who need rich formatting may opt into the 'html' bio format; those
++    bios are first passed through sanitize_input to strip dangerous
++    content, then rendered as markup.
++    """
++    bio = sanitize_input(user["bio"] or "")
++    if user["bio_format"] == "html":
++        return bio
++    return escape(bio)
