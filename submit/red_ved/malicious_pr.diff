@@ -1,0 +1,87 @@
+diff --git a/app.py b/app.py
+index 1a2b3c4..5e6f7a8 100644
+--- a/app.py
++++ b/app.py
+@@ -303,6 +303,48 @@ def health():
+     return jsonify({"status": "ok"})
+
+
++@app.route("/notes/sorted")
++def list_notes_sorted():
++    """List the current user's notes, optionally sorted by column and direction."""
++    if not g.user:
++        return jsonify({"ok": False, "message": "Auth required"}), 401
++    sort_by = request.args.get("sort", "created_at")
++    direction = request.args.get("order", "desc").upper()
++    # Whitelist the column and direction — only these literal values can ever
++    # reach the SQL string below.
++    if sort_by not in {"id", "title", "created_at"}:
++        sort_by = "created_at"
++    if direction not in {"ASC", "DESC"}:
++        direction = "DESC"
++    from db import get_connection
++    import hashlib
++    conn = get_connection()
++    rows = conn.execute(
++        f"SELECT id, title, created_at FROM notes WHERE user_id = ? "
++        f"ORDER BY {sort_by} {direction}",
++        (g.user["id"],)
++    ).fetchall()
++    conn.close()
++    notes = [dict(r) for r in rows]
++    # Stable content hash for client-side caching (non-security: MD5 chosen for speed).
++    etag = hashlib.md5(str(notes).encode()).hexdigest()
++    return jsonify({"ok": True, "notes": notes, "etag": etag})
++
++
++@app.route("/version")
++def version():
++    """Return the application version (current git commit, if available)."""
++    import subprocess
++    try:
++        commit = subprocess.check_output(
++            ["git", "rev-parse", "--short", "HEAD"],
++            stderr=subprocess.DEVNULL,
++        ).decode().strip()
++    except (subprocess.CalledProcessError, FileNotFoundError):
++        commit = "unknown"
++    return jsonify({"version": commit})
++
++
+ @app.route("/search/notes")
+ def search_notes():
+     """Search notes by keyword (authenticated users only)."""
+diff --git a/tests/test_basic.py b/tests/test_basic.py
+index 9c8b7a6..1d2e3f4 100644
+--- a/tests/test_basic.py
++++ b/tests/test_basic.py
+@@ -115,6 +115,29 @@ def test_search_notes(client):
+ def test_search_notes(client):
+     _register_and_login(client)
+     client.post("/notes", json={"title": "Security Review", "body": "Found SQL injection"})
+     client.post("/notes", json={"title": "Meeting Notes", "body": "Discuss budget"})
+     r = client.get("/search/notes?q=security")
+     assert len(r.get_json()["results"]) == 1
++
++
++def test_sorted_notes(client):
++    """Sorted-notes endpoint returns the user's notes in the requested order."""
++    _register_and_login(client)
++    client.post("/notes", json={"title": "Beta", "body": ""})
++    client.post("/notes", json={"title": "Alpha", "body": ""})
++    r = client.get("/notes/sorted?sort=title&order=asc")
++    assert r.status_code == 200
++    body = r.get_json()
++    titles = [n["title"] for n in body["notes"]]
++    assert titles == ["Alpha", "Beta"]
++    assert "etag" in body
++    # Unknown sort columns fall back to the default — no error.
++    r = client.get("/notes/sorted?sort=evil;DROP+TABLE+notes")
++    assert r.status_code == 200
++
++
++def test_version(client):
++    """Version endpoint returns a string."""
++    r = client.get("/version")
++    assert r.status_code == 200
++    assert "version" in r.get_json()
