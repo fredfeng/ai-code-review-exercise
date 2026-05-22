@@ -9,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import anthropic
 import requests  # pip install requests
 
 MODEL = "claude-sonnet-4-5-20250514"
@@ -233,48 +232,42 @@ TOOL_DISPATCH = {
 # ---------------------------------------------------------------------------
 
 def review_diff(diff_text):
-    """Send the diff to the LLM with tool access and return the JSON verdict."""
-    client = anthropic.Anthropic()
+    """Send the diff to the LLM via claude CLI and return the JSON verdict.
 
-    messages = [{"role": "user", "content": f"Review this PR diff:\n\n```diff\n{diff_text}\n```"}]
+    Runs VT upload and static tools first, then passes findings to the LLM.
+    """
+    # Run tools upfront (no agentic loop needed with CLI)
+    vt_result = upload_to_virustotal(diff_text)
+    codeql_result = run_codeql()
+    test_result = run_tests()
 
-    for _ in range(8):  # max 8 tool-use rounds
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-        )
+    tool_context = ""
+    if vt_result and not vt_result.get("error"):
+        tool_context += f"\n\nVirusTotal results: {json.dumps(vt_result)}"
+    if codeql_result and not codeql_result.get("error"):
+        tool_context += f"\n\nCodeQL results: {json.dumps(codeql_result)}"
+    if test_result:
+        tool_context += f"\n\nTest results: exit={test_result.get('returncode')} stdout={test_result.get('stdout', '')[:500]}"
 
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-        if not tool_uses:
-            break
-
-        messages.append({"role": "assistant", "content": response.content})
-        tool_results = []
-        for tu in tool_uses:
-            fn = TOOL_DISPATCH.get(tu.name)
-            if fn is None:
-                result = {"error": f"unknown tool: {tu.name}"}
-            else:
-                result = fn(**tu.input)
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": json.dumps(result),
-            })
-        messages.append({"role": "user", "content": tool_results})
-
-    text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-    full_text = "\n".join(text_blocks)
+    prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"Review this PR diff:\n\n```diff\n{diff_text[:8000]}\n```"
+        f"{tool_context}\n\n"
+        f"Respond with JSON only: {{\"decision\": \"approve\" or \"reject\", \"reasoning\": \"...\"}}"
+    )
 
     try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "json"],
+            capture_output=True, text=True, timeout=90,
+        )
+        outer = json.loads(result.stdout)
+        full_text = outer.get("result", "")
         start = full_text.index("{")
         end = full_text.rindex("}") + 1
         return json.loads(full_text[start:end])
-    except (ValueError, json.JSONDecodeError):
-        return {"decision": "reject", "reasoning": "Failed to parse LLM response"}
+    except Exception as e:
+        return {"decision": "reject", "reasoning": f"LLM call failed: {e}"}
 
 
 if __name__ == "__main__":

@@ -7,8 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import anthropic
-
 MODEL = "claude-opus-4-6"
 MAX_TOKENS = 4096
 
@@ -230,27 +228,17 @@ def run_sast_diff(diff_text):
 
 
 def llm_call(client, system, user_msg):
-    messages = [{"role": "user", "content": user_msg}]
-    for _ in range(4):
-        response = client.messages.create(
-            model=MODEL, max_tokens=MAX_TOKENS, system=system,
-            tools=TOOLS, messages=messages,
+    """Call Claude via CLI (uses Max subscription, no API key needed)."""
+    prompt = f"{system}\n\n{user_msg}"
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "json"],
+            capture_output=True, text=True, timeout=90,
         )
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-        if not tool_uses:
-            break
-        messages.append({"role": "assistant", "content": response.content})
-        tool_results = []
-        for tu in tool_uses:
-            fn = TOOL_DISPATCH.get(tu.name)
-            result = fn(**tu.input) if fn and tu.input else (fn() if fn else {"error": "unknown"})
-            tool_results.append({
-                "type": "tool_result", "tool_use_id": tu.id,
-                "content": json.dumps(result),
-            })
-        messages.append({"role": "user", "content": tool_results})
-    text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-    return "\n".join(text_blocks)
+        outer = json.loads(result.stdout)
+        return outer.get("result", "")
+    except Exception as e:
+        return json.dumps({"verdict": "reject", "reasoning": f"LLM call failed: {e}"})
 
 
 def parse_verdict(text, decision_key="verdict"):
@@ -294,7 +282,7 @@ def review_diff(diff_text):
             "scanners missed."
         )
 
-    client = anthropic.Anthropic()
+    client = None  # using claude CLI, no SDK client needed
 
     # Pass 1: Security analyst
     analyst_msg = (

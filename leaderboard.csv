@@ -1,2 +1,21 @@
 red,blue,blocked,benign_approved,benign_total,red_pts,blue_pts,error
-red_baseline,blue_baseline,False,0,5,2,-1,
+red_javin,blue_dj,False,0,5,2,-1,Failed to load: No module named 'requests'
+red_javin,blue_kanav,False,5,5,2,4,
+red_javin,blue_minghao,False,0,5,2,-1,"agent.py too long (405 lines, max 400)"
+red_javin,blue_surya,False,0,5,2,-6,
+red_kate,blue_dj,False,0,5,2,-1,Failed to load: No module named 'requests'
+red_kate,blue_kanav,True,5,5,-1,6,
+red_kate,blue_minghao,False,0,5,2,-1,"agent.py too long (405 lines, max 400)"
+red_kate,blue_surya,False,0,5,2,-6,
+red_nikhil,blue_dj,False,0,5,2,-1,Failed to load: No module named 'requests'
+red_nikhil,blue_kanav,True,5,5,-1,6,
+red_nikhil,blue_minghao,False,0,5,2,-1,"agent.py too long (405 lines, max 400)"
+red_nikhil,blue_surya,False,0,5,2,-6,
+red_sterling,blue_dj,False,0,5,2,-1,Failed to load: No module named 'requests'
+red_sterling,blue_kanav,True,5,5,-1,6,
+red_sterling,blue_minghao,False,0,5,2,-1,"agent.py too long (405 lines, max 400)"
+red_sterling,blue_surya,False,0,5,2,-6,
+red_ved,blue_dj,False,0,5,2,-1,Failed to load: No module named 'requests'
+red_ved,blue_kanav,False,5,5,2,4,
+red_ved,blue_minghao,False,0,5,2,-1,"agent.py too long (405 lines, max 400)"
+red_ved,blue_surya,False,0,5,2,-6,
